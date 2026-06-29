@@ -118,13 +118,13 @@ class TcpServer(Node):
         self.unity_tcp_sender.send_unity_service_response(srv_id, data)
 
     def handle_syscommand(self, topic, data):
-        function = getattr(self.syscommands, topic[2:])
+        function = getattr(self.syscommands, topic[2:], None)
         if function is None:
             self.send_unity_error("Don't understand SysCommand.'{}'".format(topic))
-        else:
-            message_json = data.decode("utf-8")[:-1]
-            params = json.loads(message_json)
-            function(**params)
+            return
+        message_json = data.decode("utf-8")[:-1]
+        params = json.loads(message_json)
+        function(**params)
 
     def loginfo(self, text):
         self.get_logger().info(text)
@@ -246,6 +246,18 @@ class SysCommands:
             self.tcp_server.executor.add_node(new_publisher)
 
         self.tcp_server.loginfo("RegisterPublisher({}, {}) OK".format(topic, message_class))
+
+    def remove_subscriber(self, topic):
+        old_node = self.tcp_server.subscribers_table.pop(topic, None)
+        if old_node is not None:
+            self.tcp_server.unregister_node(old_node)
+            self.tcp_server.loginfo("RemoveSubscriber({}) OK".format(topic))
+
+    def remove_publisher(self, topic):
+        old_node = self.tcp_server.publishers_table.pop(topic, None)
+        if old_node is not None:
+            self.tcp_server.unregister_node(old_node)
+            self.tcp_server.loginfo("RemovePublisher({}) OK".format(topic))
 
     def ros_service(self, topic, message_name):
         if topic == "":
