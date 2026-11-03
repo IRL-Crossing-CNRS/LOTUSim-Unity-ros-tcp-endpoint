@@ -143,12 +143,16 @@ class TcpServer(Node):
             MultiThreadedExecutor allows us to set the number of threads
             needed as well as the nodes that need to be spun.
         """
-        num_threads = (
+        # The tables are still empty here (Unity registers its topics after
+        # start-up), so the count was always 1: one thread served every topic
+        # for the life of the process. Use a fixed pool instead.
+        num_threads = max(
             len(self.publishers_table.keys())
             + len(self.subscribers_table.keys())
             + len(self.ros_services_table.keys())
             + len(self.unity_services_table.keys())
-            + 1
+            + 1,
+            8,
         )
         executor = MultiThreadedExecutor(num_threads)
 

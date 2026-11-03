@@ -34,6 +34,49 @@ except:
     from Queue import Empty
 
 
+# Topics whose every message is an event, not a state: none may be replaced by a
+# newer one (renderer_cmd carries one CREATE or DELETE per vessel).
+EVENT_TOPIC_SUFFIXES = ("renderer_cmd",)
+
+
+def is_event_topic(topic):
+    return topic.rstrip("/").endswith(EVENT_TOPIC_SUFFIXES)
+
+
+class LatestWinsQueue:
+    """
+    Outgoing queue that keeps only the newest pending message of each topic.
+
+    A plain unbounded FIFO sent every message in order: whenever Unity read
+    slower than ROS published (poses at high rate), the backlog grew and the
+    latency to Unity rose until restart (0.6 s to 1.5 s over a few runs).
+    Topic messages are state, so a newer one replaces a pending older one in
+    place; other items (handshake, logs, services) keep FIFO order.
+    """
+
+    def __init__(self):
+        self._queue = Queue()
+        self._lock = threading.Lock()
+        self._pending = {}
+
+    def put(self, item):
+        self._queue.put((False, item))
+
+    def put_latest(self, topic, item):
+        with self._lock:
+            is_new = topic not in self._pending
+            self._pending[topic] = item
+        if is_new:
+            self._queue.put((True, topic))
+
+    def get(self, timeout=None):
+        is_topic, value = self._queue.get(timeout=timeout)
+        if not is_topic:
+            return value
+        with self._lock:
+            return self._pending.pop(value)
+
+
 class UnityTcpSender:
     """
     Sends messages to Unity.
@@ -87,7 +130,10 @@ class UnityTcpSender:
     def send_unity_message(self, topic, message):
         if self.queue is not None:
             serialized_message = ClientThread.serialize_message(topic, message)
-            self.queue.put(serialized_message)
+            if is_event_topic(topic):
+                self.queue.put(serialized_message)
+            else:
+                self.queue.put_latest(topic, serialized_message)
 
     def send_unity_service_request(self, topic, service_class, request):
         if self.queue is None:
@@ -167,7 +213,7 @@ class UnityTcpSender:
 
     def sender_loop(self, conn, tid, halt_event):
         s = None
-        local_queue = Queue()
+        local_queue = LatestWinsQueue()
 
         # send a handshake message to confirm the connection and version number
         handshake_metadata = SysCommand_Handshake_Metadata()

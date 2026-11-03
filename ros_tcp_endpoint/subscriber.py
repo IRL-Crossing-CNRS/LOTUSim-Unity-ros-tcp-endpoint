@@ -20,6 +20,7 @@ from rclpy.qos import QoSDurabilityPolicy, QoSHistoryPolicy, QoSReliabilityPolic
 from rclpy.qos import QoSProfile
 
 from .communication import RosReceiver
+from .tcp_sender import is_event_topic
 
 
 class RosSubscriber(RosReceiver):
@@ -42,9 +43,13 @@ class RosSubscriber(RosReceiver):
         self.msg = message_class
         self.tcp_server = tcp_server
 
+        # State topics (poses...) only need their newest message. Event topics
+        # (renderer_cmd: one CREATE/DELETE per vessel) need every message,
+        # including the history a late subscriber is replayed: with depth 10,
+        # Unity joining after a 59-agent spawn received the last 10 only.
         qos_profile = QoSProfile(
             history=QoSHistoryPolicy.KEEP_LAST,
-            depth=1000,
+            depth=1000 if is_event_topic(topic) else 10,
             reliability=QoSReliabilityPolicy.RELIABLE,
             durability=QoSDurabilityPolicy.TRANSIENT_LOCAL
         )
